@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+__authors__ = ["DrSchottky", "GoobyCorp"]
+__version__ = "1.0.0.0"
+
 from enum import Enum
 from io import BytesIO
+from typing import Union
 from struct import pack, unpack
 from argparse import ArgumentParser
-from typing import Union
 
 class BLOCK_TYPE(Enum):
 	SMALL = 0x0

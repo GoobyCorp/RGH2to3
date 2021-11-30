@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 
+__authors__ = ["DrSchottky", "GoobyCorp"]
+__version__ = "1.0.0.0"
+
 import re
 import hmac
+from typing import Union
 from hashlib import sha1
 from struct import unpack
 from os.path import isfile
@@ -13,17 +17,16 @@ import ecc_utils
 from rc4 import RC4
 
 _1BL_KEY = bytes.fromhex("DD88AD0C9ED669E7B56794FB68563EFA")
-_SW_VER = "v1.0.0"
 
 CPUKEY_EXP = re.compile(r"^[0-9a-fA-F]{32}$")
 
-def decrypt_cba(cba: bytes, key: bytes) -> bytes:
+def decrypt_cba(cba: Union[bytes, bytearray], key: Union[bytes, bytearray]) -> bytes:
 	key = hmac.new(key, cba[0x10:0x20], sha1).digest()[0:0x10]
 	# cb = cb[0:0x10] + key + RC4.new(key).decrypt(cb[0x20:])
 	cba = cba[:0x10] + key + RC4(key).crypt(cba[0x20:])
 	return cba
 
-def decrypt_cbb(cbb: bytes, cba: bytes, cpukey: bytes) -> bytes:
+def decrypt_cbb(cbb: Union[bytes, bytearray], cba: Union[bytes, bytearray], cpukey: bytes) -> bytes:
 	secret = cba[0x10:0x20]
 	h = hmac.new(secret, digestmod=sha1)
 	h.update(cbb[0x10:0x20])
