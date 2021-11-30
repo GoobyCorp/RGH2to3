@@ -7,8 +7,8 @@ import re
 import hmac
 from typing import Union
 from hashlib import sha1
-from struct import unpack
 from os.path import isfile
+from struct import unpack_from
 from argparse import ArgumentParser, FileType, ArgumentTypeError
 
 # rc4.py
@@ -51,15 +51,15 @@ def main() -> None:
 		cpukey = args.cpukey
 	elif isfile("cpukey.bin"):
 		with open("cpukey.bin", "rb") as f:
-			cpukey = f.read()
+			cpukey = f.read()[:0x10]  # first 16 bytes
 	elif isfile("cpukey.txt"):
 		with open("cpukey.txt", "r") as f:
-			cpukey = bytes.fromhex(f.read().strip())
+			cpukey = bytes.fromhex(f.read().strip()[:0x20])  # first 32 characters
 	else:
 		print("No CPU key found, aborting...")
 		return
 
-	print("Loading ECC")
+	print("Loading ECC...")
 	ecc = args.eccfile.read()
 	args.eccfile.close()
 
@@ -72,18 +72,18 @@ def main() -> None:
 		print("Unexpected ECC length, aborting...")
 		return
 
-	print("\nExtracting RGH3 SMC")
-	(rgh3_smc_len, rgh3_smc_start) = unpack(">LL", ecc[0x78:0x80])
+	print("\nExtracting RGH3 SMC...")
+	(rgh3_smc_len, rgh3_smc_start) = unpack_from(">2I", ecc, 0x78)
 	rgh3_smc = ecc[rgh3_smc_start:rgh3_smc_len + rgh3_smc_start]
-	loader_start = unpack(">L", ecc[0x8:0xC])[0]
+	(loader_start,) = unpack_from(">I", ecc, 8)
 
-	print("\nExtracting RGH3 Bootloaders")
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", ecc[loader_start:loader_start + 16])
+	print("\nExtracting RGH3 Bootloaders...")
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", ecc, loader_start)
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	rgh3_cba = ecc[loader_start:loader_start + loader_size]
 	loader_start += loader_size
 
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", ecc[loader_start:loader_start + 16])
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", ecc, loader_start)
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	rgh3_payload = ecc[loader_start:loader_start + loader_size]
 
@@ -91,7 +91,7 @@ def main() -> None:
 		print("\nMissing ECC bootloaders, aborting...")
 		return
 
-	print("\nLoading FB")
+	print("\nLoading FB...")
 	fb = args.infile.read()
 	args.infile.close()
 	fb_with_ecc = False
@@ -135,32 +135,32 @@ def main() -> None:
 		print("XeLL header not found, aborting...")
 		return
 
-	print("\nPatching SMC")
+	print("\nPatching SMC...")
 	patchable_fb = patchable_fb[:rgh3_smc_start] + rgh3_smc + patchable_fb[rgh3_smc_start + rgh3_smc_len:]
 
-	print("\nExtracting FB bootloaders")
+	print("\nExtracting FB bootloaders...")
 
-	loader_start = unpack(">L", patchable_fb[0x8:0xC])[0]
+	(loader_start,) = unpack_from(">I", patchable_fb, 8)
 
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	fb_cba = patchable_fb[loader_start:loader_start + loader_size]
 	fb_cba_start = loader_start
 	loader_start += loader_size
 
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	fb_cbb = patchable_fb[loader_start:loader_start + loader_size]
 	fb_cbb_start = loader_start
 
-	print("\nDecrypting CB")
+	print("\nDecrypting CB...")
 	fb_cba = decrypt_cba(fb_cba)
 	fb_cbb = decrypt_cbb(fb_cbb, fb_cba[0x10:0x20], cpukey)
 	if fb_cbb[0x392:0x39A] not in [b"XBOX_ROM", b"\x00" * 8]:
 		print("CB_B decryption error (wrong CPU key?), aborting...")
 		return
 
-	print("\nPatching CB")
+	print("\nPatching CB...")
 	original_size = len(patchable_fb)
 	new_cbb = rgh3_payload + fb_cbb
 	patchable_fb = patchable_fb[:fb_cba_start] + rgh3_cba + new_cbb + patchable_fb[fb_cbb_start + len(fb_cbb):]
@@ -168,7 +168,7 @@ def main() -> None:
 	print(f"I had to remove 0x{new_size - original_size:02X} bytes after CE to make it fit.")
 	patchable_fb = patchable_fb[:original_size]
 
-	print("\nMerging image")
+	print("\nMerging image...")
 	if fb_with_ecc:
 		patchable_fb = addecc(patchable_fb, block_type=block_type)
 	fb = patchable_fb + fb[len(patchable_fb):]
