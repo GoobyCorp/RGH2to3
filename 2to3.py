@@ -11,28 +11,25 @@ from struct import unpack
 from os.path import isfile
 from argparse import ArgumentParser, FileType, ArgumentTypeError
 
-# ecc_utils.py
-import ecc_utils
 # rc4.py
 from rc4 import RC4
+# ecc_utils.py
+from ecc_utils import BLOCK_TYPE, addecc, unecc
 
 _1BL_KEY = bytes.fromhex("DD88AD0C9ED669E7B56794FB68563EFA")
 
-CPUKEY_EXP = re.compile(r"^[0-9a-fA-F]{32}$")
+CPUKEY_EXP = re.compile(r"^([0-9a-fA-F]{32})$")
 
-def decrypt_cba(cba: Union[bytes, bytearray], key: Union[bytes, bytearray]) -> bytes:
-	key = hmac.new(key, cba[0x10:0x20], sha1).digest()[0:0x10]
-	# cb = cb[0:0x10] + key + RC4.new(key).decrypt(cb[0x20:])
+def decrypt_cba(cba: Union[bytes, bytearray]) -> bytes:
+	key = hmac.new(_1BL_KEY, cba[0x10:0x20], sha1).digest()[:0x10]
 	cba = cba[:0x10] + key + RC4(key).crypt(cba[0x20:])
 	return cba
 
-def decrypt_cbb(cbb: Union[bytes, bytearray], cba: Union[bytes, bytearray], cpukey: Union[bytes, bytearray]) -> bytes:
-	secret = cba[0x10:0x20]
-	h = hmac.new(secret, digestmod=sha1)
+def decrypt_cbb(cbb: Union[bytes, bytearray], nonce: Union[bytes, bytearray], cpukey: Union[bytes, bytearray]) -> bytes:
+	h = hmac.new(nonce, digestmod=sha1)
 	h.update(cbb[0x10:0x20])
 	h.update(cpukey)
 	key = h.digest()[:0x10]
-	# cb = cbb[0:0x10] + key + RC4.new(key).decrypt(cbb[0x20:])
 	cbb = cbb[:0x10] + key + RC4(key).crypt(cbb[0x20:])
 	return cbb
 
@@ -68,7 +65,7 @@ def main() -> None:
 
 	if len(ecc) == 1351680:
 		print("ECC contains spare data")
-		ecc = ecc_utils.unecc(ecc)
+		ecc = unecc(ecc)
 	elif len(ecc) == 1310720:
 		print("ECC does not contain spare data")
 	else:
@@ -103,7 +100,7 @@ def main() -> None:
 		print("FB image contains spare data")
 		xell_start = 0x73800
 		patchable_fb = fb[:xell_start]
-		patchable_fb = ecc_utils.unecc(patchable_fb)
+		patchable_fb = unecc(patchable_fb)
 		fb_with_ecc = True
 	elif len(fb) == 50331648:
 		print("FB image does not contain spare data")
@@ -117,14 +114,14 @@ def main() -> None:
 		spare_sample = fb[0x4400:0x4410]
 		if spare_sample[0] == 0xFF:
 			print("Detected 256/512MB Big Block Flash")
-			block_type = ecc_utils.BLOCK_TYPE.BIG
+			block_type = BLOCK_TYPE.BIG
 		elif spare_sample[5] == 0xFF:
 			if spare_sample[:2] == b"\x01\x00":
 				print("Detected 16/64MB Small Block Flash")
-				block_type = ecc_utils.BLOCK_TYPE.SMALL
+				block_type = BLOCK_TYPE.SMALL
 			elif spare_sample[:2] == b"\x00\x01":
 				print("Detected 16/64MB Big on Small Flash")
-				block_type = ecc_utils.BLOCK_TYPE.BIG_ON_SMALL
+				block_type = BLOCK_TYPE.BIG_ON_SMALL
 			else:
 				print("Can't detect flash type, aborting...")
 				return
@@ -157,8 +154,8 @@ def main() -> None:
 	fb_cbb_start = loader_start
 
 	print("\nDecrypting CB")
-	plain_fb_cba = decrypt_cba(fb_cba, _1BL_KEY)
-	fb_cbb = decrypt_cbb(fb_cbb, plain_fb_cba, cpukey)
+	fb_cba = decrypt_cba(fb_cba)
+	fb_cbb = decrypt_cbb(fb_cbb, fb_cba[0x10:0x20], cpukey)
 	if fb_cbb[0x392:0x39A] not in [b"XBOX_ROM", b"\x00" * 8]:
 		print("CB_B decryption error (wrong CPU key?), aborting...")
 		return
@@ -173,7 +170,7 @@ def main() -> None:
 
 	print("\nMerging image")
 	if fb_with_ecc:
-		patchable_fb = ecc_utils.addecc(patchable_fb, block_type=block_type)
+		patchable_fb = addecc(patchable_fb, block_type=block_type)
 	fb = patchable_fb + fb[len(patchable_fb):]
 
 	args.outfile.write(fb)
