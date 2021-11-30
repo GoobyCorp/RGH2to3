@@ -26,7 +26,7 @@ def decrypt_cba(cba: Union[bytes, bytearray], key: Union[bytes, bytearray]) -> b
 	cba = cba[:0x10] + key + RC4(key).crypt(cba[0x20:])
 	return cba
 
-def decrypt_cbb(cbb: Union[bytes, bytearray], cba: Union[bytes, bytearray], cpukey: bytes) -> bytes:
+def decrypt_cbb(cbb: Union[bytes, bytearray], cba: Union[bytes, bytearray], cpukey: Union[bytes, bytearray]) -> bytes:
 	secret = cba[0x10:0x20]
 	h = hmac.new(secret, digestmod=sha1)
 	h.update(cbb[0x10:0x20])

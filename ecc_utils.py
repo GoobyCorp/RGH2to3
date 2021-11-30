@@ -7,7 +7,7 @@ from enum import Enum
 from io import BytesIO
 from typing import Union
 from struct import pack, unpack
-from argparse import ArgumentParser
+from argparse import ArgumentParser, FileType
 
 class BLOCK_TYPE(Enum):
 	SMALL = 0x0
@@ -68,26 +68,27 @@ def verify(data: Union[bytes, bytearray], block: int = 0, off_8: Union[bytes, by
 		block += 1
 		data = data[0x210:]
 
+def lowercase_type(s: str) -> str:
+	return s.lower()
+
 def main() -> None:
-	parser = ArgumentParser(description="", add_help=False)
-	parser.add_argument("-u", "--unecc", action="store_true", help="UnECC an image")
-	parser.add_argument("-e", "--ecc", action="store_true", help="ECC an image")
-	parser.add_argument("-v", "--verify", action="store_true", help="Verify an image")
-	parser.add_argument("infile", type=str, help="The image to work with")
+	parser = ArgumentParser(description="A script to ECC or UNECC an image")
+	parser.add_argument("mode", type=lowercase_type, choices=["unecc", "ecc", "verify"], help="The mode of operation")
+	parser.add_argument("infile", type=FileType("rb"), help="The image to work with")
 	args = parser.parse_args()
 
-	with open(args.infile, "rb") as f:
-		image = f.read()
+	image = args.infile.read()
+	args.infile.close()
 
-	if args.unecc:
-		image = unecc(image)
-		with open(args.infile + ".unecc", "wb") as f:
-			f.write(image)
-	elif args.ecc:
+	if args.mode == "ecc":
 		image = addecc(image)
-		with open(args.infile + ".ecc", "wb") as f:
+		with open(args.infile.name + ".ecc", "wb") as f:
 			f.write(image)
-	elif args.verify:
+	elif args.mode == "unecc":
+		image = unecc(image)
+		with open(args.infile.name + ".unecc", "wb") as f:
+			f.write(image)
+	elif args.mode == "verify":
 		verify(image)
 	else:
 		help()
