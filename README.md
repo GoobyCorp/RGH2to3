@@ -4,7 +4,7 @@
 ```
 usage: 2to3.py [-h] [-k CPUKEY] eccfile infile outfile
 
-RGH2 to RGH3 by DrSchottky
+RGH2 to RGH3 by DrSchottky v1.0.0.0
 
 positional arguments:
   eccfile               The ECC file to apply
