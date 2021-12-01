@@ -6,7 +6,7 @@ __version__ = "1.0.0.0"
 from enum import Enum
 from io import BytesIO
 from typing import Union
-from struct import pack, unpack
+from struct import pack, unpack, pack_into
 from argparse import ArgumentParser, FileType
 
 class BLOCK_TYPE(Enum):
@@ -19,33 +19,35 @@ def calcecc(data: Union[bytes, bytearray]) -> bytes:
 	val = 0
 	for i in range(0x1066):
 		if not i & 31:
-			v = ~unpack("<L", data[i // 8:(i // 8) + 4])[0]
+			v = ~unpack("<I", data[i // 8:(i // 8) + 4])[0]
 		val ^= v & 1
 		v >>= 1
 		if val & 1:
 			val ^= 0x6954559
 		val >>= 1
 	val = ~val
-	return data[:-4] + pack("<L", (val << 6) & 0xFFFFFFFF)
+	return data[:-4] + pack("<I", (val << 6) & 0xFFFFFFFF)
 
-def addecc(data: Union[bytes, bytearray], block: int = 0, off_8: Union[bytes, bytearray] = b"\x00" * 4, block_type: BLOCK_TYPE = BLOCK_TYPE.BIG_ON_SMALL):
-	res = b""
-	while len(data):
-		d = (data[:0x200] + b"\x00" * 0x200)[:0x200]
-		data = data[0x200:]
+def addecc(data: Union[bytes, bytearray], block_type: BLOCK_TYPE = BLOCK_TYPE.BIG_ON_SMALL):
+	block = 0
+	with BytesIO(data) as rbio, BytesIO() as wbio:
+		d = bytearray(0x200)
+		t = rbio.read(0x200)
+		d[:len(t)] = t
 
 		if block_type == BLOCK_TYPE.BIG_ON_SMALL:
-			d += pack("<BL3B4s4s", 0, block // 32, 0xFF, 0, 0, off_8, b"\x00" * 4)
+			d += pack("<BI3B8x", 0, block // 32, 0xFF, 0, 0)
 		elif block_type == BLOCK_TYPE.BIG:
-			d += pack("<BL3B4s4s", 0xFF, block // 256, 0, 0, 0, off_8, b"\x00" * 4)
+			d += pack("<BI3B8x", 0xFF, block // 256, 0, 0, 0)
 		elif block_type == BLOCK_TYPE.SMALL:
-			d += pack("<L4B4s4s", block // 32, 0, 0xFF, 0, 0, off_8, b"\x00" * 4)
+			d += pack("<L4B8x", block // 32, 0, 0xFF, 0, 0)
 		else:
 			raise ValueError("Block type not supported")
+
 		d = calcecc(d)
 		block += 1
-		res += d
-	return res
+		wbio.write(d)
+		return wbio.getvalue()
 
 def unecc(image: Union[bytes, bytearray]) -> bytes:
 	with BytesIO(image) as rbio, BytesIO() as wbio:

@@ -170,7 +170,7 @@ def main() -> None:
 
 	print("\nMerging image...")
 	if fb_with_ecc:
-		patchable_fb = addecc(patchable_fb, block_type=block_type)
+		patchable_fb = addecc(patchable_fb, block_type)
 	fb = patchable_fb + fb[len(patchable_fb):]
 
 	args.outfile.write(fb)
