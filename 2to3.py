@@ -25,8 +25,8 @@ def decrypt_cba(cba: Union[bytes, bytearray]) -> bytes:
 	cba = cba[:0x10] + key + RC4(key).crypt(cba[0x20:])
 	return cba
 
-def decrypt_cbb(cbb: Union[bytes, bytearray], nonce: Union[bytes, bytearray], cpukey: Union[bytes, bytearray]) -> bytes:
-	h = hmac.new(nonce, digestmod=sha1)
+def decrypt_cbb(cbb: Union[bytes, bytearray], cba_key: Union[bytes, bytearray], cpukey: Union[bytes, bytearray]) -> bytes:
+	h = hmac.new(cba_key, digestmod=sha1)
 	h.update(cbb[0x10:0x20])
 	h.update(cpukey)
 	key = h.digest()[:0x10]
@@ -86,6 +86,15 @@ def main() -> None:
 	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", ecc, loader_start)
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	rgh3_payload = ecc[loader_start:loader_start + loader_size]
+
+	# with open("extracted/rgh3_smc.bin", "wb") as f:
+	# 	f.write(rgh3_smc)
+
+	# with open("extracted/rgh3_cba.bin", "wb") as f:
+	# 	f.write(rgh3_cba)
+
+	# with open("extracted/rgh3_payload.bin", "wb") as f:
+	# 	f.write(rgh3_payload)
 
 	if not rgh3_payload or not rgh3_cba:
 		print("\nMissing ECC bootloaders, aborting...")

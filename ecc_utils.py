@@ -15,6 +15,9 @@ class BLOCK_TYPE(Enum):
 	BIG = 0x02
 
 def calcecc(data: Union[bytes, bytearray]) -> bytes:
+	if type(data) != bytearray:
+		data = bytearray(data)
+
 	assert len(data) == 0x210
 	val = 0
 	for i in range(0x1066):
@@ -26,28 +29,30 @@ def calcecc(data: Union[bytes, bytearray]) -> bytes:
 			val ^= 0x6954559
 		val >>= 1
 	val = ~val
-	return data[:-4] + pack("<I", (val << 6) & 0xFFFFFFFF)
+	pack_into("<I", data, len(data) - 4, (val << 6) & 0xFFFFFFFF)
+	return data
 
 def addecc(data: Union[bytes, bytearray], block_type: BLOCK_TYPE = BLOCK_TYPE.BIG_ON_SMALL):
-	block = 0
 	with BytesIO(data) as rbio, BytesIO() as wbio:
-		d = bytearray(0x200)
-		t = rbio.read(0x200)
-		d[:len(t)] = t
+		block = 0
+		while rbio.tell() < len(data):
+			d = bytearray(528)
+			t = rbio.read(512)
+			d[:len(t)] = t
 
-		if block_type == BLOCK_TYPE.BIG_ON_SMALL:
-			d += pack("<BI3B8x", 0, block // 32, 0xFF, 0, 0)
-		elif block_type == BLOCK_TYPE.BIG:
-			d += pack("<BI3B8x", 0xFF, block // 256, 0, 0, 0)
-		elif block_type == BLOCK_TYPE.SMALL:
-			d += pack("<L4B8x", block // 32, 0, 0xFF, 0, 0)
-		else:
-			raise ValueError("Block type not supported")
+			if block_type == BLOCK_TYPE.BIG_ON_SMALL:
+				pack_into("<BI3B8x", d, 512, 0, block // 32, 0xFF, 0, 0)
+			elif block_type == BLOCK_TYPE.BIG:
+				pack_into("<BI3B8x", d, 512, 0xFF, block // 256, 0, 0, 0)
+			elif block_type == BLOCK_TYPE.SMALL:
+				pack_into("<I4B8x", d, 512, block // 32, 0, 0xFF, 0, 0)
+			else:
+				raise ValueError("Block type not supported")
 
-		d = calcecc(d)
-		block += 1
-		wbio.write(d)
-		return wbio.getvalue()
+			d = calcecc(d)
+			block += 1
+			wbio.write(d)
+			return wbio.getvalue()
 
 def unecc(image: Union[bytes, bytearray]) -> bytes:
 	with BytesIO(image) as rbio, BytesIO() as wbio:
@@ -61,7 +66,7 @@ def verify(data: Union[bytes, bytearray], block: int = 0, off_8: Union[bytes, by
 		d = (data[:0x200] + b"\x00" * 0x200)[:0x200]
 		d += pack("<L4B4s4s", block // 32, 0, 0xFF, 0, 0, off_8, b"\x00" * 4)
 		d = calcecc(d)
-		calc_ecc = d[0x200:]
+		calc_ecc = d[0x200:0x210]
 		file_ecc = data[0x200:0x210]
 		if calc_ecc != file_ecc:
 			print(f"ECC mismatch on page 0x{block:02X} (0x{(block + 1) * 0x210 - 0x10:02X})")
