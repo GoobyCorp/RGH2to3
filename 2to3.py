@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 
-__authors__ = ["GoobyCorp", "DrSchottky"]
-__version__ = "1.1.0.0"
-
 import re
 import hmac
 from hashlib import sha1
+from struct import unpack
 from os.path import isfile
-from struct import unpack_from
 from argparse import ArgumentParser, FileType, ArgumentTypeError
 
 # ecc_utils.py
@@ -16,6 +13,7 @@ import ecc_utils
 from rc4 import RC4
 
 _1BL_KEY = bytes.fromhex("DD88AD0C9ED669E7B56794FB68563EFA")
+_SW_VER = "v1.1.0"
 
 CPUKEY_EXP = re.compile(r"^[0-9a-fA-F]{32}$")
 
@@ -43,7 +41,7 @@ def cpukey_type(key: str) -> bytes:
 	raise ArgumentTypeError("CPU key isn't a 32 character hex string")
 
 def main() -> None:
-	parser = ArgumentParser(description=f"RGH2 to RGH3 by DrSchottky v{__version__}")
+	parser = ArgumentParser(description=f"RGH2 to RGH3 by DrSchottky {_SW_VER}")
 	parser.add_argument("eccfile", type=FileType("rb"), help="The ECC file to apply")
 	parser.add_argument("infile", type=FileType("rb"), help="The flash image to convert to RGH3")
 	parser.add_argument("outfile", type=FileType("wb"), help="The flash image to output to")
@@ -76,17 +74,17 @@ def main() -> None:
 		return
 
 	print("\nExtracting RGH3 SMC")
-	(rgh3_smc_len, rgh3_smc_start) = unpack_from(">2I", ecc, 0x78)
+	(rgh3_smc_len, rgh3_smc_start) = unpack(">LL", ecc[0x78:0x80])
 	rgh3_smc = ecc[rgh3_smc_start:rgh3_smc_len + rgh3_smc_start]
-	(loader_start,) = unpack_from(">I", ecc, 8)
+	loader_start = unpack(">L", ecc[0x8:0xC])[0]
 
 	print("\nExtracting RGH3 Bootloaders")
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", ecc, loader_start)
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", ecc[loader_start:loader_start + 16])
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	rgh3_cba = ecc[loader_start:loader_start + loader_size]
 	loader_start += loader_size
 
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", ecc, loader_start)
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", ecc[loader_start:loader_start + 16])
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	rgh3_payload = ecc[loader_start:loader_start + loader_size]
 
@@ -95,7 +93,7 @@ def main() -> None:
 		return
 
 	rgh3_cba_dec = decrypt_cba(rgh3_cba, _1BL_KEY)
-	rgh3_payload_dec = bytearray(decrypt_cbb(rgh3_payload, rgh3_cba_dec, b"\x00" * 16))
+	rgh3_payload_dec = bytearray(decrypt_cbb(rgh3_payload, rgh3_cba_dec, b"\x00"*16))
 	if rgh3_payload_dec[0x354:0x358] == b"\x64\x6A\x00\x02":
 		print("Patching fake CB_B (RHG3 payload)")
 		rgh3_payload_dec[0x354:0x358] = b"\x64\x69\x00\x02"
@@ -141,15 +139,15 @@ def main() -> None:
 
 	print("\nExtracting FB bootloaders")
 
-	(loader_start,) = unpack_from(">I", patchable_fb, 8)
+	loader_start = unpack(">L", patchable_fb[0x8:0xC])[0]
 
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	fb_cba = patchable_fb[loader_start:loader_start + loader_size]
 	fb_cba_start = loader_start
 	loader_start += loader_size
 
-	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
+	(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
 	print(f"Found {loader_name.decode()} {loader_ver} with size 0x{loader_size:08X} at 0x{loader_start:08X}")
 	fb_cbb = patchable_fb[loader_start:loader_start + loader_size]
 	fb_cbb_start = loader_start
@@ -157,17 +155,17 @@ def main() -> None:
 
 	if xell_not_found:
 		print("Looking for XDK BL")
-		(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
+		(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
 		loader_start += loader_size
 		if loader_name.decode() != "SC":
 			print("Not an XDK image, aborting...")
 			return
 		print("XDK image found, changing patching method")
 		#Get SD
-		(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
+		(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
 		loader_start += loader_size
 		#Get SE
-		(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack_from(">2sH3I", patchable_fb, loader_start)
+		(loader_name, loader_ver, loader_flags, loader_ep, loader_size) = unpack(">2sHLLL", patchable_fb[loader_start:loader_start + 16])
 		loader_start += loader_size
 		new_page = loader_start // 0x200
 		if (loader_start % 0x200 != 0):
